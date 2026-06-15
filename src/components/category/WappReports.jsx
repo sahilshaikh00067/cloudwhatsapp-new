@@ -4,9 +4,9 @@ import { Calendar } from "lucide-react";
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
-const API_DJANGO   = "https://api.cloudwhatsapp.in";
-const POLL_MS      = 5000;
-const FILTERS      = ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Month", "Last Month", "Custom Range"];
+const API_DJANGO = "https://api.cloudwhatsapp.in";
+const POLL_MS = 5000;
+const FILTERS = ["Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Month", "Last Month", "Custom Range"];
 
 // ─────────────────────────────────────────────
 // PURE HELPERS (outside component — never recreated)
@@ -21,7 +21,7 @@ function getUserId() {
 }
 
 function passesFilter(isoDate, filter) {
-  const d   = new Date(isoDate);
+  const d = new Date(isoDate);
   const now = new Date();
 
   switch (filter) {
@@ -50,21 +50,32 @@ function passesFilter(isoDate, filter) {
   }
 }
 
+
+function dedupeMedia(media) {
+  const seen = new Set();
+  return (media || []).filter(m => {
+    const key = m?.name || JSON.stringify(m);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function formatEntry(r, index, total) {
   return {
-    id:       r.id,
-    name:     `Campaign ${total - index}`,
-    number:   r.total,
-    message:  r.message,
-    date:     new Date(r.created_at).toLocaleString(),
-    total:    r.total,
-    failed:   r.failed,
-    valid:    r.success,
-    nonwa:    r.nonwa    || 0,
+    id: r.id,
+    name: `Campaign ${total - index}`,
+    number: r.total,
+    message: r.message,
+    date: new Date(r.created_at).toLocaleString(),
+    total: r.total,
+    failed: r.failed,
+    valid: r.success,
+    nonwa: r.nonwa || 0,
     rejected: r.rejected || 0,
-    media:    r.media    || [],
-    results:  r.results  || [],
-    status:   r.status   || "completed",
+    media: dedupeMedia(r.media),
+    results: r.results || [],
+    status: r.status || "completed",
   };
 }
 
@@ -100,6 +111,7 @@ const StatusBadge = memo(({ status }) =>
 );
 
 const ExpandedRow = memo(({ entry }) => {
+  console.log("ENTRY MEDIA:", entry.media);
   if (entry.status === "pending") {
     return (
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
@@ -113,12 +125,6 @@ const ExpandedRow = memo(({ entry }) => {
 
   return (
     <>
-      <div className="flex gap-2 mb-3 flex-wrap">
-        <span className="bg-blue-500 text-white px-3 py-1 text-xs rounded">TOTAL {entry.total}</span>
-        <span className="bg-red-500 text-white px-3 py-1 text-xs rounded">FAILED {entry.failed}</span>
-        <span className="bg-green-500 text-white px-3 py-1 text-xs rounded">VALID {entry.valid}</span>
-        <span className="bg-yellow-500 text-white px-3 py-1 text-xs rounded">NONWA {entry.nonwa}</span>
-      </div>
 
       {(entry.media || []).filter(f => f?.type?.includes("image")).length > 0 && (
         <div className="flex gap-2 flex-wrap mb-2">
@@ -142,6 +148,13 @@ const ExpandedRow = memo(({ entry }) => {
           📄 {pdf.name}
         </a>
       ))}
+
+      <div className="flex gap-3 mt-3 flex-wrap">
+        <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">TOTAL {entry.total}</span>
+        <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">FAILED {entry.failed}</span>
+        <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">VALID {entry.valid}</span>
+        <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">NONWA {entry.nonwa}</span>
+      </div>
     </>
   );
 });
@@ -150,15 +163,15 @@ const ExpandedRow = memo(({ entry }) => {
 // MAIN
 // ─────────────────────────────────────────────
 const WappReports = () => {
-  const [filterOpen,      setFilterOpen]      = useState(false);
-  const [selectedFilter,  setSelectedFilter]  = useState("Today");
-  const [entries,         setEntries]         = useState([]);
-  const [openRow,         setOpenRow]         = useState(null);
-  const [perPage,         setPerPage]         = useState(10);
-  const [page,            setPage]            = useState(1);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState("Today");
+  const [entries, setEntries] = useState([]);
+  const [openRow, setOpenRow] = useState(null);
+  const [perPage, setPerPage] = useState(10);
+  const [page, setPage] = useState(1);
 
-  const pollRef    = useRef(null);
-  const filterRef  = useRef(null);
+  const pollRef = useRef(null);
+  const filterRef = useRef(null);
 
   // ── Close dropdown on outside click ──
   useEffect(() => {
@@ -175,10 +188,10 @@ const WappReports = () => {
   const loadReports = useCallback(async () => {
     try {
       const userId = getUserId();
-      const res    = await fetch(`${API_DJANGO}/api/get-campaigns/?user_id=${userId}`);
-      const data   = await res.json();
+      const res = await fetch(`${API_DJANGO}/api/get-campaigns/?user_id=${userId}`);
+      const data = await res.json();
 
-      const filtered  = data.filter(r => passesFilter(r.created_at, selectedFilter));
+      const filtered = data.filter(r => passesFilter(r.created_at, selectedFilter));
       const formatted = filtered.map((r, i) => formatEntry(r, i, filtered.length));
 
       setEntries(formatted);
@@ -214,9 +227,9 @@ const WappReports = () => {
 
   const handleDownload = useCallback((data) => {
     try {
-      const csv  = buildCSV(data);
+      const csv = buildCSV(data);
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url  = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
       const link = Object.assign(document.createElement("a"), {
         href: url,
         download: `campaign-report-${Date.now()}.csv`,
@@ -235,8 +248,8 @@ const WappReports = () => {
   const selectFilter = useCallback((f) => { setSelectedFilter(f); setFilterOpen(false); }, []);
 
   // ── Pagination ──
-  const totalPages  = Math.ceil(entries.length / perPage);
-  const paginated   = entries.slice((page - 1) * perPage, page * perPage);
+  const totalPages = Math.ceil(entries.length / perPage);
+  const paginated = entries.slice((page - 1) * perPage, page * perPage);
   const pendingCount = entries.filter(e => e.status === "pending").length;
 
   return (
@@ -356,11 +369,10 @@ const WappReports = () => {
                             onClick={() => handleDownload(e)}
                             disabled={e.status === "pending"}
                             title={e.status === "pending" ? "Available after completion" : "Download CSV"}
-                            className={`px-3 py-1 rounded-b-md text-white text-sm transition ${
-                              e.status === "pending"
-                                ? "bg-gray-300 cursor-not-allowed"
-                                : "bg-[#20A8D8] hover:bg-[#1b8db8]"
-                            }`}
+                            className={`px-3 py-1 rounded-b-md text-white text-sm transition ${e.status === "pending"
+                              ? "bg-gray-300 cursor-not-allowed"
+                              : "bg-[#20A8D8] hover:bg-[#1b8db8]"
+                              }`}
                           >
                             {e.status === "pending" ? "⏳ Wait" : "Download"}
                           </button>

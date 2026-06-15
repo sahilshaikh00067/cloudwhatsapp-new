@@ -492,7 +492,16 @@ def send_whatsapp(request):
 
         # Tally (pending campaigns have 0/0/0 — results not processed yet)
         if status == "pending":
-            sent = failed = nonwa = 0
+         print(
+        f"""
+🚀 NEW CAMPAIGN
+
+👤 User: {user.username}
+📊 Total: {total}
+⏳ Status: PENDING
+💳 Credits Left: {user.credit}
+"""
+    )
         else:
             sent, failed, nonwa = _tally(clean)
 

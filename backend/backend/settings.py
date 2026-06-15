@@ -25,8 +25,12 @@ SECRET_KEY = 'django-insecure-%3x!z6^b07cqqh))o&o*l&u8tvp*o6$vv$nyr=p2dn(i_45+-0
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
-
+ALLOWED_HOSTS = [
+    "api.cloudwhatsapp.in",
+    "www.api.cloudwhatsapp.in",
+    "127.0.0.1",
+    "localhost",
+]
 
 # Application definition
 
@@ -54,6 +58,11 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 CORS_ALLOW_ALL_ORIGINS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://api.cloudwhatsapp.in",
+    "https://voicechannel.vercel.app",
+]
 ROOT_URLCONF = 'backend.urls'
 
 TEMPLATES = [

@@ -7,7 +7,7 @@ import { FaComments } from "react-icons/fa";
 // ─────────────────────────────────────────────
 const API_NODE   = "https://wa.cloudwhatsapp.in";
 const API_DJANGO = "https://whatsappsms-olho.onrender.com";
-const QUEUE_THRESHOLD = 50;
+const QUEUE_THRESHOLD = 15;
 
 // ─────────────────────────────────────────────
 // MODAL — memoized so it never re-renders unless modal changes
@@ -237,7 +237,10 @@ export default function WappCampaign() {
         setLoading(false);
         return;
       }
-      if (data.status === "queued") {
+      if (
+   data.status === "queued" ||
+   data.status === "approval_pending"
+) {
         showModal("info", "Campaign Queued ⏳",
           `Total Numbers: ${data.total}\n\nYour campaign will complete in 30–50 minutes.\n\nReport mein "PENDING" dikhega — complete hone ke baad "COMPLETED" ho jayega.`
         );

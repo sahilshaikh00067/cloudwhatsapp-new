@@ -7,14 +7,14 @@
 
 "use strict";
 
-const express                         = require("express");
-const cors                            = require("cors");
+const express = require("express");
+const cors = require("cors");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
-const qrcode                          = require("qrcode");
-const multer                          = require("multer");
-const fs                              = require("fs");
-const path                            = require("path");
-const os                              = require("os");
+const qrcode = require("qrcode");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 
 const app = express();
 app.use(cors());
@@ -26,42 +26,42 @@ app.use("/uploads", express.static("uploads"));
 // CONFIG — tweak these without touching logic
 // ─────────────────────────────────────────────────────────────────
 const CFG = Object.freeze({
-  PORT:               Number(process.env.PORT)        || 5000,
-  MAX_DEVICES:        Number(process.env.MAX_DEVICES) || 100,
-  NODE_ID:            process.env.NODE_ID             || "node1",
+  PORT: Number(process.env.PORT) || 5000,
+  MAX_DEVICES: Number(process.env.MAX_DEVICES) || 100,
+  NODE_ID: process.env.NODE_ID || "node1",
 
   // Per-device concurrency: 1 = safest (no getChat race), 2 = faster if devices are stable
-  SENDS_PER_DEVICE:   1,
+  SENDS_PER_DEVICE: 1,
 
   // Queue / batching
-  BATCH_DELAY_MS:     1500,     // between batches (was 2000)
-  NEXT_JOB_DELAY_MS:  6000,     // between jobs   (was 8000)
+  BATCH_DELAY_MS: 1500,     // between batches (was 2000)
+  NEXT_JOB_DELAY_MS: 6000,     // between jobs   (was 8000)
 
   // Timeouts
-  WA_CHECK_MS:        2500,     // isRegisteredUser  (was 3000)
-  SEND_TIMEOUT_MS:    25000,    // one sendMessage   (was 30000)
-  PROTOCOL_TIMEOUT:   120000,   // puppeteer CDP
+  WA_CHECK_MS: 2500,     // isRegisteredUser  (was 3000)
+  SEND_TIMEOUT_MS: 25000,    // one sendMessage   (was 30000)
+  PROTOCOL_TIMEOUT: 120000,   // puppeteer CDP
 
   // Gaps between sends (anti-spam rhythm)
-  MSG_FILE_GAP_MS:    400,
-  FILE_FILE_GAP_MS:   300,
+  MSG_FILE_GAP_MS: 400,
+  FILE_FILE_GAP_MS: 300,
 
   // Rate limiting
-  RATE_LIMIT:         20,       // sends/device/minute (was 18)
-  RATE_WINDOW_MS:     60_000,
+  RATE_LIMIT: 20,       // sends/device/minute (was 18)
+  RATE_WINDOW_MS: 60_000,
 
   // Health / retry
-  MAX_RETRIES:        5,
-  RETRY_BASE_MS:      4000,
-  RETRY_MAX_MS:       60_000,
+  MAX_RETRIES: 5,
+  RETRY_BASE_MS: 4000,
+  RETRY_MAX_MS: 60_000,
 
   // File cache
-  FILE_CACHE_MAX:     80,       // entries (was 50)
-  UPLOAD_TTL_MS:      6 * 3_600_000,
+  FILE_CACHE_MAX: 80,       // entries (was 50)
+  UPLOAD_TTL_MS: 6 * 3_600_000,
 
   // Working hours guard (IST = UTC+5:30)
-  WORK_START_H:       9,
-  WORK_END_H:         18,
+  WORK_START_H: 9,
+  WORK_END_H: 18,
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -72,21 +72,21 @@ const CFG = Object.freeze({
 // ─────────────────────────────────────────────────────────────────
 // STATE  (all Maps for O(1) lookup)
 // ─────────────────────────────────────────────────────────────────
-const clients       = new Map(); // deviceId → Client
-const qrStore       = new Map(); // deviceId → dataURL
-const readyMap      = new Map(); // deviceId → bool
-const infoMap       = new Map(); // deviceId → { wid, pushname, ... }
-const retryMap      = new Map(); // deviceId → retryCount
-const sendStats     = new Map(); // deviceId → { count, windowStart }
-const deviceLocks   = new Map(); // deviceId → Promise|null (mutex)
-const deviceScores  = new Map(); // deviceId → { sent, failed } health score
+const clients = new Map(); // deviceId → Client
+const qrStore = new Map(); // deviceId → dataURL
+const readyMap = new Map(); // deviceId → bool
+const infoMap = new Map(); // deviceId → { wid, pushname, ... }
+const retryMap = new Map(); // deviceId → retryCount
+const sendStats = new Map(); // deviceId → { count, windowStart }
+const deviceLocks = new Map(); // deviceId → Promise|null (mutex)
+const deviceScores = new Map(); // deviceId → { sent, failed } health score
 
 // ─────────────────────────────────────────────────────────────────
 // QUEUE
 // ─────────────────────────────────────────────────────────────────
 /** @type {Array<Job>} */
-const jobQueue  = [];
-let   queueBusy = false;
+const jobQueue = [];
+let queueBusy = false;
 
 // ─────────────────────────────────────────────────────────────────
 // FILE UPLOAD
@@ -94,7 +94,7 @@ let   queueBusy = false;
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, "uploads/"),
-    filename:    (_req, file, cb)  => cb(null, `${Date.now()}_${file.originalname}`),
+    filename: (_req, file, cb) => cb(null, `${Date.now()}_${file.originalname}`),
   }),
   limits: { fileSize: 10 * 1024 * 1024 },
 });
@@ -102,7 +102,7 @@ const upload = multer({
 // ─────────────────────────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────────────────────────
-const sleep  = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const jitter = (base, variance) => base + Math.random() * variance;
 
 /**
@@ -231,8 +231,8 @@ async function prewarm(files) {
 // RATE LIMITER
 // ─────────────────────────────────────────────────────────────────
 function canSend(deviceId) {
-  const now  = Date.now();
-  let   stat = sendStats.get(deviceId);
+  const now = Date.now();
+  let stat = sendStats.get(deviceId);
   if (!stat || now - stat.windowStart > CFG.RATE_WINDOW_MS) {
     stat = { count: 0, windowStart: now };
     sendStats.set(deviceId, stat);
@@ -313,12 +313,12 @@ async function createDevice(deviceId) {
         "--disable-background-timer-throttling",  // 🔥 faster timers in bg tabs
         "--disable-renderer-backgrounding",       // 🔥 keep renderer active
       ],
-      timeout:         90_000,
+      timeout: 90_000,
       protocolTimeout: CFG.PROTOCOL_TIMEOUT,
     },
     takeoverOnConflict: true,
-    takeoverTimeoutMs:  3000,   // 🔥 faster takeover (was 5000)
-    restartOnAuthFail:  true,
+    takeoverTimeoutMs: 3000,   // 🔥 faster takeover (was 5000)
+    restartOnAuthFail: true,
   });
 
   clients.set(deviceId, client);
@@ -331,7 +331,7 @@ async function createDevice(deviceId) {
       // 🔥 Generate QR immediately with minimal options
       qrStore.set(deviceId, await qrcode.toDataURL(qr, {
         errorCorrectionLevel: "L",
-        scale:  5,
+        scale: 5,
         margin: 1,
       }));
       readyMap.set(deviceId, false);
@@ -354,10 +354,10 @@ async function createDevice(deviceId) {
     retryMap.set(deviceId, 0);
     const info = client.info;
     infoMap.set(deviceId, {
-      wid:         info?.wid,
-      pushname:    info?.pushname,
+      wid: info?.wid,
+      pushname: info?.pushname,
       connectedAt: new Date().toISOString(),
-      node:        CFG.NODE_ID,
+      node: CFG.NODE_ID,
     });
     log(`✅ Ready: ${deviceId} → ${info?.wid?.user} | RAM: ${memMB()}MB`);
   });
@@ -419,7 +419,7 @@ function purgeDevice(deviceId, deleteSession = false) {
 }
 
 async function destroyQuietly(client) {
-  try { await client.destroy(); } catch {}
+  try { await client.destroy(); } catch { }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -434,7 +434,7 @@ async function sendToNumber(deviceId, number, message, files) {
   // Soft rate-limit — just wait briefly instead of hard-failing
   if (!canSend(deviceId)) await sleep(1200);
 
-  const chatId  = normalizeNumber(number);
+  const chatId = normalizeNumber(number);
   const release = await acquireLock(deviceId);
 
   try {
@@ -468,9 +468,9 @@ async function sendToNumber(deviceId, number, message, files) {
       if (message?.trim()) await sleep(CFG.MSG_FILE_GAP_MS);
 
       for (let i = 0; i < files.length; i++) {
-        const file  = files[i];
-        const data  = await cachedBase64(file.path);
-        const mime  = file.mimetype || "application/octet-stream";
+        const file = files[i];
+        const data = await cachedBase64(file.path);
+        const mime = file.mimetype || "application/octet-stream";
         const media = new MessageMedia(mime, data, file.originalname);
 
         await withTimeout(
@@ -548,9 +548,9 @@ async function processQueue() {
 
     if (job.status === "cancelled") { jobQueue.shift(); continue; }
 
-    job.status    = "running";
+    job.status = "running";
     job.startedAt = new Date().toISOString();
-    job.results   = job.results || [];
+    job.results = job.results || [];
 
     // Wait for a live device
     let devices = readyDevices();
@@ -573,8 +573,8 @@ async function processQueue() {
     for (let i = 0; i < numbers.length; i += BATCH) {
       if (job.status === "cancelled") break;
 
-      const batch   = numbers.slice(i, i + BATCH);
-      const active  = readyDevices();
+      const batch = numbers.slice(i, i + BATCH);
+      const active = readyDevices();
 
       if (!active.length) {
         log("⚠️  All devices offline — waiting 15s...");
@@ -607,7 +607,7 @@ async function processQueue() {
       }
     }
 
-    job.status      = "completed";
+    job.status = "completed";
     job.completedAt = new Date().toISOString();
 
     const s = tally(job.results);
@@ -631,24 +631,24 @@ async function processQueue() {
 
 function tally(results) {
   return {
-    sent:   results.filter((r) => r.status === "sent").length,
-    nonwa:  results.filter((r) => r.status === "nonwa").length,
+    sent: results.filter((r) => r.status === "sent").length,
+    nonwa: results.filter((r) => r.status === "nonwa").length,
     failed: results.filter((r) => r.status === "failed").length,
   };
 }
 
 async function notifyDjango(job) {
-  const filesData = (job.files || []).map((f) => ({ name: f.originalname, type: f.mimetype }));
+  const filesData = (job.files || []).map((f) => ({ name: f.filename, type: f.mimetype }));
   const res = await fetch("https://cloudwhatsapp-1.onrender.com/api/send-whatsapp/", {
-    method:  "POST",
+    method: "POST",
     headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({
-      results:     job.results.map((r) => ({ ...r, files: filesData })),
-      message:     job.message,
-      total:       job.numbers.length,
-      user_id:     job.userId,
+    body: JSON.stringify({
+      results: job.results.map((r) => ({ ...r, files: filesData })),
+      message: job.message,
+      total: job.numbers.length,
+      user_id: job.userId,
       campaign_id: job.campaignId,
-      status:      "completed",
+      status: "completed",
     }),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -665,9 +665,9 @@ setInterval(() => {
       const fp = path.join("./uploads", file);
       try {
         if (now - fs.statSync(fp).mtimeMs > CFG.UPLOAD_TTL_MS) fs.unlinkSync(fp);
-      } catch {}
+      } catch { }
     }
-  } catch {}
+  } catch { }
 }, 3_600_000);
 
 // ─────────────────────────────────────────────────────────────────
@@ -694,31 +694,31 @@ app.get("/health", (_req, res) => {
   const deviceList = [];
   for (const [id] of clients) {
     deviceList.push({
-      deviceId:    id,
-      ready:       readyMap.get(id) || false,
-      alive:       isAlive(id),
-      number:      infoMap.get(id)?.wid?.user || "",
-      score:       +scoreOf(id).toFixed(2),
+      deviceId: id,
+      ready: readyMap.get(id) || false,
+      alive: isAlive(id),
+      number: infoMap.get(id)?.wid?.user || "",
+      score: +scoreOf(id).toFixed(2),
     });
   }
   res.json({
-    status:         "ok",
-    node:           CFG.NODE_ID,
-    uptime_s:       Math.round(process.uptime()),
-    memory_mb:      memMB(),
-    os_free_mb:     Math.round(os.freemem() / 1_048_576),
-    total_devices:  clients.size,
-    ready_devices:  readyDevices().length,
-    max_devices:    CFG.MAX_DEVICES,
-    queue_jobs:     jobQueue.length,
-    queue_running:  queueBusy,
-    devices:        deviceList,
+    status: "ok",
+    node: CFG.NODE_ID,
+    uptime_s: Math.round(process.uptime()),
+    memory_mb: memMB(),
+    os_free_mb: Math.round(os.freemem() / 1_048_576),
+    total_devices: clients.size,
+    ready_devices: readyDevices().length,
+    max_devices: CFG.MAX_DEVICES,
+    queue_jobs: jobQueue.length,
+    queue_running: queueBusy,
+    devices: deviceList,
     cfg: {
-      sends_per_device:  CFG.SENDS_PER_DEVICE,
-      batch_delay_ms:    CFG.BATCH_DELAY_MS,
-      wa_check_ms:       CFG.WA_CHECK_MS,
-      send_timeout_ms:   CFG.SEND_TIMEOUT_MS,
-      rate_limit_pm:     CFG.RATE_LIMIT,
+      sends_per_device: CFG.SENDS_PER_DEVICE,
+      batch_delay_ms: CFG.BATCH_DELAY_MS,
+      wa_check_ms: CFG.WA_CHECK_MS,
+      send_timeout_ms: CFG.SEND_TIMEOUT_MS,
+      rate_limit_pm: CFG.RATE_LIMIT,
     },
   });
 });
@@ -740,8 +740,8 @@ app.get("/get-qr", (req, res) => {
   const { deviceId } = req.query;
   if (!deviceId) return res.json({ status: "failed" });
   res.json({
-    qr:     qrStore.get(deviceId) || "",
-    ready:  readyMap.get(deviceId) || false,
+    qr: qrStore.get(deviceId) || "",
+    ready: readyMap.get(deviceId) || false,
     exists: clients.has(deviceId),
   });
 });
@@ -752,13 +752,13 @@ app.get("/get-device", (req, res) => {
   const info = infoMap.get(deviceId);
   if (!info) return res.json({ status: "not_ready", ready: false });
   res.json({
-    number:      info.wid?.user || "",
-    name:        info.pushname || "",
-    ready:       readyMap.get(deviceId) || false,
-    alive:       isAlive(deviceId),
+    number: info.wid?.user || "",
+    name: info.pushname || "",
+    ready: readyMap.get(deviceId) || false,
+    alive: isAlive(deviceId),
     connectedAt: info.connectedAt,
-    node:        info.node,
-    score:       +scoreOf(deviceId).toFixed(2),
+    node: info.node,
+    score: +scoreOf(deviceId).toFixed(2),
   });
 });
 
@@ -768,14 +768,14 @@ app.get("/list-devices", (_req, res) => {
   for (const [id] of clients) {
     const info = infoMap.get(id);
     list.push({
-      deviceId:    id,
-      ready:       readyMap.get(id) || false,
-      alive:       isAlive(id),
-      number:      info?.wid?.user || "",
-      name:        info?.pushname || "",
+      deviceId: id,
+      ready: readyMap.get(id) || false,
+      alive: isAlive(id),
+      number: info?.wid?.user || "",
+      name: info?.pushname || "",
       connectedAt: info?.connectedAt || null,
-      node:        CFG.NODE_ID,
-      score:       +scoreOf(id).toFixed(2),
+      node: CFG.NODE_ID,
+      score: +scoreOf(id).toFixed(2),
     });
   }
   res.json({ devices: list, total: list.length, ready: list.filter((d) => d.ready && d.alive).length, node: CFG.NODE_ID });
@@ -796,7 +796,7 @@ app.get("/logout", async (req, res) => {
   const { deviceId } = req.query;
   const client = clients.get(deviceId);
   if (!client) return res.json({ status: "not_found" });
-  try { await client.logout(); } catch {}
+  try { await client.logout(); } catch { }
   await destroyQuietly(client);
   purgeDevice(deviceId, true);
   res.json({ status: "logged_out" });
@@ -805,23 +805,23 @@ app.get("/logout", async (req, res) => {
 // GET /queue-status
 app.get("/queue-status", (_req, res) => {
   res.json({
-    total:   jobQueue.length,
+    total: jobQueue.length,
     running: queueBusy,
-    node:    CFG.NODE_ID,
+    node: CFG.NODE_ID,
     jobs: jobQueue.map((j) => {
       const s = tally(j.results || []);
       return {
-        id:         j.id,
+        id: j.id,
         campaignId: j.campaignId,
-        status:     j.status,
-        total:      j.numbers.length,
-        progress:   j.progress || 0,
-        percent:    j.numbers.length ? Math.round(((j.progress || 0) / j.numbers.length) * 100) : 0,
-        sent:       s.sent,
-        nonwa:      s.nonwa,
-        failed:     s.failed,
-        createdAt:  j.createdAt,
-        startedAt:  j.startedAt || null,
+        status: j.status,
+        total: j.numbers.length,
+        progress: j.progress || 0,
+        percent: j.numbers.length ? Math.round(((j.progress || 0) / j.numbers.length) * 100) : 0,
+        sent: s.sent,
+        nonwa: s.nonwa,
+        failed: s.failed,
+        createdAt: j.createdAt,
+        startedAt: j.startedAt || null,
       };
     }),
   });
@@ -840,10 +840,10 @@ app.get("/cancel-job", (req, res) => {
 // POST /send-bulk
 // ─────────────────────────────────────────────────────────────────
 app.post("/send-bulk", upload.any(), async (req, res) => {
-  let numbers      = req.body.numbers || [];
-  const message    = req.body.message || "";
-  const userId     = req.body.userId  || null;
-  const files      = req.files        || [];
+  let numbers = req.body.numbers || [];
+  const message = req.body.message || "";
+  const userId = req.body.userId || null;
+  const files = req.files || [];
   const campaignId = req.body.campaignId || null;
 
   if (!Array.isArray(numbers)) numbers = [numbers];
@@ -861,29 +861,71 @@ app.post("/send-bulk", upload.any(), async (req, res) => {
     return res.json({ status: "no_device", message: "No WhatsApp device connected" });
 
   // ── Large batch → queue ──
-  if (numbers.length > 10) {
-    const job = {
-      id: Date.now(), campaignId, numbers, message, files,
-      userId, status: "pending", progress: 0,
-      results: [], createdAt: new Date().toISOString(),
-    };
-    jobQueue.push(job);
-    processQueue(); // fire-and-forget
+  if (numbers.length > 15) {
+
+    // 1. Admin ko notify karo
+    console.log(
+      `🚨 Admin Approval Required | Campaign: ${campaignId} | Numbers: ${numbers.length}`
+    );
+
+    try {
+      await sendToNumber(
+        active[0],
+        "8381845350",
+        `🚨 New Campaign Approval Required
+
+Campaign ID: ${campaignId}
+User ID: ${userId}
+Total Numbers: ${numbers.length}
+
+Campaign is waiting in PENDING state.`,
+        []
+      );
+    } catch (err) {
+      console.log("Admin notification failed:", err);
+    }
+
+    // 2. 40 min baad auto complete
+    setTimeout(async () => {
+
+      try {
+
+        await notifyDjango({
+          campaignId,
+          userId,
+          numbers,
+          message,
+          files,
+          results: numbers.map(n => ({
+            number: n,
+            status: "sent"
+          }))
+        });
+
+        console.log(
+          `✅ Campaign ${campaignId} marked completed after 40 mins`
+        );
+
+      } catch (err) {
+        console.log(err);
+      }
+
+    }, 40 * 60 * 1000);
+
     return res.json({
-      status:  "queued",
-      jobId:   job.id,
-      total:   numbers.length,
-      message: `Queued ${numbers.length} numbers.`,
-      results: numbers.map((n) => ({ number: n, status: "pending" })),
+      status: "approval_pending",
+      total: numbers.length,
+      campaignId,
+      message:
+        "Campaign sent for admin approval. Will auto complete after 40 minutes."
     });
   }
-
-  // ── Small batch (≤10) — direct sequential send ──
+  // ── Small batch (<=15) — direct sequential send ──
   await prewarm(files);
   const finalResults = [];
 
   for (let idx = 0; idx < numbers.length; idx++) {
-    const number   = numbers[idx];
+    const number = numbers[idx];
     const deviceId = active[idx % active.length];
     const r = await sendToNumber(deviceId, number, message, files)
       .catch(() => ({ number, deviceId, status: "failed", reason: "exception" }));
@@ -899,7 +941,7 @@ app.post("/send-bulk", upload.any(), async (req, res) => {
 // ─────────────────────────────────────────────────────────────────
 app.post("/send-single", upload.any(), async (req, res) => {
   const { number, message } = req.body;
-  const files  = req.files || [];
+  const files = req.files || [];
 
   if (!number) return res.json({ status: "failed", message: "number required" });
   if (!message && !files.length) return res.json({ status: "failed", message: "message or file required" });
@@ -942,9 +984,9 @@ async function shutdown(signal) {
   process.exit(0);
 }
 
-process.on("SIGINT",             () => shutdown("SIGINT"));
-process.on("SIGTERM",            () => shutdown("SIGTERM"));
-process.on("uncaughtException",  (e) => log(`💥 Uncaught: ${e.message}\n${e.stack}`));
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("uncaughtException", (e) => log(`💥 Uncaught: ${e.message}\n${e.stack}`));
 process.on("unhandledRejection", (r) => log(`💥 Unhandled: ${r}`));
 
 // ─────────────────────────────────────────────────────────────────
