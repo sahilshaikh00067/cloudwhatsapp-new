@@ -232,7 +232,7 @@ export default function WappDpCampaign() {
    data.status === "queued" ||
    data.status === "approval_pending"
 ){
-        showModal("info", "Campaign Queued ⏳",
+        showModal("info", "Campaign ⏳",
           `Total Numbers: ${data.total}\n\nCompletes in 30–50 minutes.\n\nReport mein "PENDING" dikhega — baad mein "COMPLETED" ho jayega.`
         );
         resetForm();
@@ -398,7 +398,7 @@ export default function WappDpCampaign() {
             {numberList.length > 0 && (
               <p className="mt-2 text-sm text-gray-500">
                 📋 {numberList.length} unique number{numberList.length !== 1 ? "s" : ""}
-                {isLarge && <span className="ml-2 text-orange-500 font-medium">⏳ Will be queued</span>}
+                {isLarge && <span className="ml-2 text-orange-500 font-medium">⏳</span>}
               </p>
             )}
 
@@ -434,13 +434,13 @@ export default function WappDpCampaign() {
                 👑 Admin — {numberList.length} numbers sent <strong>instantly</strong>
               </p>
             ) : isLarge ? (
-              <p className="text-sm text-orange-600 bg-orange-50 rounded-lg px-3 py-2 mb-4">
-                ⏳ {numberList.length} numbers — <strong>queued</strong> (30–50 min)<br />
-                <span className="text-xs text-orange-400">PENDING → complete hone ke baad COMPLETED</span>
+              <p className="text-sm text-green-600 bg-orange-50 rounded-lg px-3 py-2 mb-4">
+                ⏳ {numberList.length}<br />
+                <span className="text-xs text-orange-400">Status "PENDING"</span>
               </p>
             ) : (
               <p className="text-sm text-green-600 bg-green-50 rounded-lg px-3 py-2 mb-4">
-                ✅ {numberList.length} numbers — sent <strong>instantly</strong>
+                ✅ {numberList.length}
               </p>
             )}
 

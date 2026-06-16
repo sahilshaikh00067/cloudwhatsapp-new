@@ -103,7 +103,6 @@ const StatusBadge = memo(({ status }) =>
         <span className="inline-block w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
         PENDING
       </span>
-      <span className="text-[10px] text-gray-400">~30-50 min</span>
     </div>
   ) : (
     <span className="bg-green-500 text-white px-2 py-1 text-xs rounded">COMPLETED</span>
@@ -116,9 +115,8 @@ const ExpandedRow = memo(({ entry }) => {
     return (
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
         <div className="text-2xl mb-2">⏳</div>
-        <p className="text-orange-700 font-semibold">Campaign In Queue</p>
-        <p className="text-orange-500 text-sm mt-1">{entry.total} numbers scheduled for delivery</p>
-        <p className="text-orange-400 text-xs mt-1">Expected: 30–50 minutes. Auto-refreshes every 5 seconds.</p>
+        <p className="text-orange-700 font-semibold">Status Pending</p>
+        <p className="text-orange-500 text-sm mt-1">{entry.total}</p>
       </div>
     );
   }
