@@ -25,65 +25,65 @@ const CreditManage = () => {
     role: "",
   });
 
-const handleAddCredit = async () => {
-  if (!selectedUser || !credit) {
-    alert("Select user & enter credit");
-    return;
-  }
-
-  try {
-    const res = await fetch("https://whatsappsms-olho.onrender.com/api/update-user/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        user_id: selectedUser.id,
-        credit: Number(selectedUser.credit || 0) + Number(credit),
-      }),
-    });
-
-    const data = await res.json();
-
-    if (data.status === "failed") {
-      alert(data.message || "Error ❌");
+  const handleAddCredit = async () => {
+    if (!selectedUser || !credit) {
+      alert("Select user & enter credit");
       return;
     }
 
-    alert("Credit Added ✅");
+    try {
+      const res = await fetch("https://whatsappsms-olho.onrender.com/api/update-user/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          user_id: selectedUser.id,
+          credit: Number(selectedUser.credit || 0) + Number(credit),
+        }),
+      });
 
-    loadUsers(); // refresh
+      const data = await res.json();
 
-    setCredit("");
-    setNotes("");
-    setSelectedUser(null);
+      if (data.status === "failed") {
+        alert(data.message || "Error ❌");
+        return;
+      }
 
-  } catch (err) {
-    console.log(err);
-    alert("Error ❌");
-  }
-};
+      alert("Credit Added ✅");
+
+      loadUsers(); // refresh
+
+      setCredit("");
+      setNotes("");
+      setSelectedUser(null);
+
+    } catch (err) {
+      console.log(err);
+      alert("Error ❌");
+    }
+  };
 
   useEffect(() => {
     loadUsers();
   }, []);
 
-const loadUsers = async () => {
-  try {
-    const user = JSON.parse(sessionStorage.getItem("user"));
+  const loadUsers = async () => {
+    try {
+      const user = JSON.parse(sessionStorage.getItem("user"));
 
-    const res = await fetch(
-      `https://whatsappsms-olho.onrender.com/api/get-users/?user_id=${user?.id}`
-    );
+      const res = await fetch(
+        `https://whatsappsms-olho.onrender.com/api/get-users/?user_id=${user?.id}`
+      );
 
-    const data = await res.json();
+      const data = await res.json();
 
-    setUsers(Array.isArray(data) ? data : []);
+      setUsers(Array.isArray(data) ? data : []);
 
-  } catch (err) {
-    console.log(err);
-  }
-};
+    } catch (err) {
+      console.log(err);
+    }
+  };
 
   const role = sessionStorage.getItem("role");
   const loggedUser = JSON.parse(sessionStorage.getItem("user"));
@@ -95,29 +95,34 @@ const loadUsers = async () => {
     )
     .filter((u) => {
 
-      if (role === "admin") return true;
+      // Admin sab dekh sakta hai
+      if (role === "admin") {
+        return true;
+      }
 
+      // Reseller sirf apne banaye users/resellers dekhega
       if (role === "reseller") {
         return u.parent === loggedUser?.username;
       }
 
-      return u.username === loggedUser?.username;
+      // User kisi ko nahi dekhega
+      return false;
     });
 
   // ✅ DELETE
-const handleDelete = async (id) => {
-  if (!window.confirm("Delete this user?")) return;
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this user?")) return;
 
-  await fetch("https://whatsappsms-olho.onrender.com/api/delete-user/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ user_id: id }),
-  });
+    await fetch("https://whatsappsms-olho.onrender.com/api/delete-user/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ user_id: id }),
+    });
 
-  loadUsers();
-};
+    loadUsers();
+  };
 
   // ✅ EDIT
   const handleEditOpen = (user) => {
@@ -125,22 +130,22 @@ const handleDelete = async (id) => {
     setEditForm({ ...user });
   };
 
-const handleEditSave = async () => {
-  await fetch("https://whatsappsms-olho.onrender.com/api/update-user/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      user_id: editUser.id,
-      ...editForm,
-    }),
-  });
+  const handleEditSave = async () => {
+    await fetch("https://whatsappsms-olho.onrender.com/api/update-user/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        user_id: editUser.id,
+        ...editForm,
+      }),
+    });
 
-  alert("User Updated ✅");
-  setEditUser(null);
-  loadUsers();
-};
+    alert("User Updated ✅");
+    setEditUser(null);
+    loadUsers();
+  };
 
   // ✅ ACTIVE / DEACTIVE
   const toggleActive = (id) => {
