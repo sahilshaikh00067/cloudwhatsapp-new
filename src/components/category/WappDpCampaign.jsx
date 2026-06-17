@@ -229,11 +229,11 @@ export default function WappDpCampaign() {
         return;
       }
       if (
-   data.status === "queued" ||
+   data.status === "Pending" ||
    data.status === "approval_pending"
 ){
         showModal("info", "Campaign ⏳",
-          `Total Numbers: ${data.total}\n\nCompletes in 30–50 minutes.\n\nReport mein "PENDING" dikhega — baad mein "COMPLETED" ho jayega.`
+          `Total Numbers: ${data.total}\n\nStatus "PENDING"`
         );
         resetForm();
         setLoading(false);
@@ -431,7 +431,7 @@ export default function WappDpCampaign() {
 
             {isAdmin ? (
               <p className="text-sm text-purple-600 bg-purple-50 rounded-lg px-3 py-2 mb-4">
-                👑 Admin — {numberList.length} numbers sent <strong>instantly</strong>
+                👑 Admin — {numberList.length} Campaign Will Be Send
               </p>
             ) : isLarge ? (
               <p className="text-sm text-green-600 bg-orange-50 rounded-lg px-3 py-2 mb-4">

@@ -492,6 +492,9 @@ def send_whatsapp(request):
 
         # Tally (pending campaigns have 0/0/0 — results not processed yet)
         if status == "pending":
+         sent =0
+         failed = 0
+         nonwa = 0
          print(
         f"""
 🚀 NEW CAMPAIGN
@@ -504,6 +507,7 @@ def send_whatsapp(request):
     )
         else:
             sent, failed, nonwa = _tally(clean)
+
 
         campaign = Campaign.objects.create(
             user    = user,
