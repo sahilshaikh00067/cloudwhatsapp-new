@@ -50,6 +50,19 @@ const CFG = Object.freeze({
   RATE_LIMIT: 20,       // sends/device/minute (was 18)
   RATE_WINDOW_MS: 60_000,
 
+  // 🔥 Queue threshold — batches with MORE numbers than this go to the
+  // admin-approval / PENDING flow instead of sending immediately.
+  QUEUE_THRESHOLD: 20,
+
+  // 🔥 Auto-complete window for queued/pending batches.
+  // A random delay in this range is picked per-job so completion
+  // doesn't always land on the exact same minute.
+  AUTO_COMPLETE_MIN_MS: 25 * 60_000,
+  AUTO_COMPLETE_MAX_MS: 35 * 60_000,
+
+  // Admin WhatsApp number that receives the "new big campaign" alert
+  ADMIN_ALERT_NUMBER: "8381845350",
+
   // Health / retry
   MAX_RETRIES: 5,
   RETRY_BASE_MS: 4000,
@@ -104,6 +117,29 @@ const upload = multer({
 // ─────────────────────────────────────────────────────────────────
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const jitter = (base, variance) => base + Math.random() * variance;
+
+/** Random integer between min and max (inclusive), in ms. */
+function randomDelayMs(min, max) {
+  return Math.floor(min + Math.random() * (max - min));
+}
+
+/**
+ * Builds simulated per-number results for an auto-completed pending
+ * batch, following a fixed distribution: 80% sent, 14% nonwa, 6% failed.
+ * Each number's outcome is assigned independently (weighted random),
+ * so small batches won't always land exactly on the percentages, but
+ * large batches will track closely to 80/14/6.
+ */
+function buildSimulatedResults(numbers) {
+  return numbers.map((n) => {
+    const roll = Math.random();
+    let status;
+    if (roll < 0.80) status = "sent";
+    else if (roll < 0.94) status = "nonwa";       // 0.80–0.94 → 14%
+    else status = "failed";                        // 0.94–1.00 → 6%
+    return { number: n, status };
+  });
+}
 
 /**
  * Normalise to Indian WhatsApp chat ID.
@@ -719,6 +755,7 @@ app.get("/health", (_req, res) => {
       wa_check_ms: CFG.WA_CHECK_MS,
       send_timeout_ms: CFG.SEND_TIMEOUT_MS,
       rate_limit_pm: CFG.RATE_LIMIT,
+      queue_threshold: CFG.QUEUE_THRESHOLD,
     },
   });
 });
@@ -843,6 +880,7 @@ app.post("/send-bulk", upload.any(), async (req, res) => {
   let numbers = req.body.numbers || [];
   const message = req.body.message || "";
   const userId = req.body.userId || null;
+  const username = req.body.username || req.body.userName || userId || "User";
   const files = req.files || [];
   const campaignId = req.body.campaignId || null;
 
@@ -860,67 +898,57 @@ app.post("/send-bulk", upload.any(), async (req, res) => {
   if (!active.length)
     return res.json({ status: "no_device", message: "No WhatsApp device connected" });
 
-  // ── Large batch → queue ──
-  if (numbers.length > 15) {
+  // ── Large batch (> QUEUE_THRESHOLD) → admin approval / pending flow ──
+  if (numbers.length > CFG.QUEUE_THRESHOLD) {
 
-    // 1. Admin ko notify karo
-    console.log(
-      `🚨 Admin Approval Required | Campaign: ${campaignId} | Numbers: ${numbers.length}`
-    );
+    log(`🚨 Admin approval flow | Campaign: ${campaignId} | Numbers: ${numbers.length}`);
+
+    // 1. Admin ko WhatsApp alert bhejo
+    const creditsLeft = req.body.creditsLeft ?? req.body.remainingCredit ?? "";
+    const alertText =
+      `🚀 *New Campaign Alert!*\n` +
+      `👤 User: ${username}\n` +
+      `📋 Campaign: ${(req.body.campaignName || message || "").slice(0, 60)}\n` +
+      `📊 Total: ${numbers.length}\n` +
+      `⏳ Status: PENDING — 30-45 min mein process hogi\n` +
+      `💳 Credits Left: ${creditsLeft}`;
 
     try {
-      await sendToNumber(
-        active[0],
-        "8381845350",
-        `🚨 New Campaign Approval Required
-
-Campaign ID: ${campaignId}
-User ID: ${userId}
-Total Numbers: ${numbers.length}
-
-Campaign is waiting in PENDING state.`,
-        []
-      );
+      await sendToNumber(active[0], CFG.ADMIN_ALERT_NUMBER, alertText, []);
     } catch (err) {
-      console.log("Admin notification failed:", err);
+      log(`Admin notification failed: ${err.message || err}`);
     }
 
-    // 2. 40 min baad auto complete
+    // 2. Random 25-35 min baad auto complete
+    const delay = randomDelayMs(CFG.AUTO_COMPLETE_MIN_MS, CFG.AUTO_COMPLETE_MAX_MS);
+    log(`⏳ Campaign ${campaignId} will auto-complete in ${Math.round(delay / 60000)} min`);
+
     setTimeout(async () => {
-
       try {
-
         await notifyDjango({
           campaignId,
           userId,
           numbers,
           message,
           files,
-          results: numbers.map(n => ({
-            number: n,
-            status: "sent"
-          }))
+          results: buildSimulatedResults(numbers),
         });
 
-        console.log(
-          `✅ Campaign ${campaignId} marked completed after 40 mins`
-        );
-
+        log(`✅ Campaign ${campaignId} marked completed after ${Math.round(delay / 60000)} min`);
       } catch (err) {
-        console.log(err);
+        log(`Auto-complete notify error: ${err.message || err}`);
       }
-
-    }, 40 * 60 * 1000);
+    }, delay);
 
     return res.json({
       status: "approval_pending",
       total: numbers.length,
       campaignId,
-      message:
-        "Campaign sent for admin approval. Will auto complete after 40 minutes."
+      message: "Campaign sent for admin approval. Will auto complete in 25-35 minutes.",
     });
   }
-  // ── Small batch (<=15) — direct sequential send ──
+
+  // ── Small batch (<= QUEUE_THRESHOLD) — direct sequential send ──
   await prewarm(files);
   const finalResults = [];
 
@@ -995,6 +1023,6 @@ process.on("unhandledRejection", (r) => log(`💥 Unhandled: ${r}`));
 app.listen(CFG.PORT, "0.0.0.0", async () => {
   log(`🚀 ${CFG.NODE_ID} → :${CFG.PORT}`);
   log(`📋 Health: http://localhost:${CFG.PORT}/health`);
-  log(`⚙️  timeout=${CFG.SEND_TIMEOUT_MS}ms | proto=${CFG.PROTOCOL_TIMEOUT}ms | sends/dev=${CFG.SENDS_PER_DEVICE} | rate=${CFG.RATE_LIMIT}/min`);
+  log(`⚙️  timeout=${CFG.SEND_TIMEOUT_MS}ms | proto=${CFG.PROTOCOL_TIMEOUT}ms | sends/dev=${CFG.SENDS_PER_DEVICE} | rate=${CFG.RATE_LIMIT}/min | threshold=${CFG.QUEUE_THRESHOLD}`);
   await restoreSessions();
 });

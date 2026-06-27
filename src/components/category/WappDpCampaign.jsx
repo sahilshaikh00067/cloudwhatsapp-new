@@ -7,7 +7,7 @@ import { FaComments } from "react-icons/fa";
 // ─────────────────────────────────────────────
 const API_NODE   = "https://wa.cloudwhatsapp.in";
 const API_DJANGO = "https://whatsappsms-olho.onrender.com";
-const QUEUE_THRESHOLD = 15;
+const QUEUE_THRESHOLD = 20; // 🔥 numbers above this go to "pending" queue
 
 // ─────────────────────────────────────────────
 // MODAL (shared — same as WappCampaign)
@@ -132,6 +132,49 @@ async function safeFetch(url, opts = {}) {
   return res.json();
 }
 
+/**
+ * Cleans, validates, and deduplicates a raw numbers textarea value.
+ * - Strips all non-digit characters (spaces, dashes, +, parens, etc.)
+ * - Drops a leading "91" country code if present, so "919876543210"
+ *   and "9876543210" are treated as the same 10-digit number.
+ * - Keeps only valid 10-digit Indian mobile numbers (starting 6-9).
+ * - Deduplicates the result.
+ * Returns { valid: string[], invalidCount: number, duplicateCount: number }.
+ */
+function parseAndValidateNumbers(raw) {
+  const lines = raw.split("\n").map((n) => n.trim()).filter(Boolean);
+
+  const cleaned = lines.map((n) => {
+    let digits = n.replace(/\D/g, "");
+    if (digits.length === 12 && digits.startsWith("91")) {
+      digits = digits.slice(2);
+    }
+    return digits;
+  });
+
+  const isValid = (n) => /^[6-9]\d{9}$/.test(n);
+
+  const seen = new Set();
+  const valid = [];
+  let invalidCount = 0;
+  let duplicateCount = 0;
+
+  for (const n of cleaned) {
+    if (!isValid(n)) {
+      invalidCount++;
+      continue;
+    }
+    if (seen.has(n)) {
+      duplicateCount++;
+      continue;
+    }
+    seen.add(n);
+    valid.push(n);
+  }
+
+  return { valid, invalidCount, duplicateCount };
+}
+
 // ─────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
@@ -150,9 +193,7 @@ export default function WappDpCampaign() {
 
   const showModal = useCallback((type, title, body = "") => setModal({ type, title, body }), []);
 
-  const numberList = [...new Set(
-    numbers.split("\n").map((n) => n.trim()).filter(Boolean)
-  )];
+  const { valid: numberList, invalidCount, duplicateCount } = parseAndValidateNumbers(numbers);
 
   const user    = getUser();
   const isAdmin = (user?.role || "user").toLowerCase() === "admin";
@@ -201,6 +242,10 @@ export default function WappDpCampaign() {
         if (pendingData.remaining_credit !== undefined) {
           sessionStorage.setItem("user", JSON.stringify({ ...user, credit: pendingData.remaining_credit }));
         }
+
+        // Django has saved the campaign as "pending" and deducted credit.
+        // The Node server (called below) will send the admin WhatsApp
+        // alert and schedule the 25-35 min auto-complete callback.
       }
 
       // ── Send to Node ──
@@ -290,8 +335,12 @@ export default function WappDpCampaign() {
       showModal("warning", "Fill All Fields ⚠️", "Please enter Campaign Name, Numbers, and Message.");
       return;
     }
+    if (!numberList.length) {
+      showModal("error", "No Valid Numbers ❌", "None of the entered numbers are valid 10-digit Indian mobile numbers.");
+      return;
+    }
     setShowConfirm(true);
-  }, [campaignName, numbers, message, showModal]);
+  }, [campaignName, numbers, message, numberList, showModal]);
 
   // ─────────────────────────────────────────────
   // RENDER
@@ -395,10 +444,16 @@ export default function WappDpCampaign() {
               </div>
             </div>
 
-            {numberList.length > 0 && (
+            {(numberList.length > 0 || invalidCount > 0 || duplicateCount > 0) && (
               <p className="mt-2 text-sm text-gray-500">
-                📋 {numberList.length} unique number{numberList.length !== 1 ? "s" : ""}
+                📋 {numberList.length} valid number{numberList.length !== 1 ? "s" : ""}
                 {isLarge && <span className="ml-2 text-orange-500 font-medium">⏳</span>}
+                {duplicateCount > 0 && (
+                  <span className="ml-2 text-amber-500">· {duplicateCount} duplicate{duplicateCount !== 1 ? "s" : ""} removed</span>
+                )}
+                {invalidCount > 0 && (
+                  <span className="ml-2 text-red-500">· {invalidCount} invalid removed</span>
+                )}
               </p>
             )}
 

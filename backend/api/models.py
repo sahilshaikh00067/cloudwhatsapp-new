@@ -51,7 +51,7 @@ class CreditLog(models.Model):
     old_credit = models.IntegerField()
     new_credit = models.IntegerField()
     notes = models.TextField(blank=True)
-    results = models.JSONField(default=list)  
+    results = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -68,7 +68,7 @@ class Campaign(models.Model):
     media = models.JSONField(default=list)
     results = models.JSONField(default=list)
 
-    # 🔥 NEW — "pending" or "completed"
+    # "pending" or "completed"
     status = models.CharField(max_length=20, default="completed")
 
     created_at = models.DateTimeField(auto_now_add=True)

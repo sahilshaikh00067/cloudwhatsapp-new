@@ -10,6 +10,17 @@ from .models import User, Campaign, CreditLog
 
 
 # ══════════════════════════════════════════════════════════════════
+# CONFIG
+# ══════════════════════════════════════════════════════════════════
+
+# Numbers <= this are sent instantly by the Node server.
+# Numbers > this go into the admin-approval / "pending" queue.
+# NOTE: keep this in sync with QUEUE_THRESHOLD in the Node server's
+# CFG object, and with QUEUE_THRESHOLD in the React components.
+QUEUE_THRESHOLD = 20
+
+
+# ══════════════════════════════════════════════════════════════════
 # PRIVATE HELPERS
 # ══════════════════════════════════════════════════════════════════
 
@@ -426,12 +437,15 @@ def send_whatsapp(request):
     POST /api/send-whatsapp/
     Called in 3 scenarios:
 
-    1. INSTANT SEND (≤10 numbers, completed immediately by Node)
+    1. INSTANT SEND (≤ QUEUE_THRESHOLD numbers, completed immediately by Node)
        Body: { results, message, total, user_id, status="completed" }
 
-    2. QUEUE PRE-SAVE (>10 numbers, React pre-saves before Node queues)
+    2. QUEUE PRE-SAVE (> QUEUE_THRESHOLD numbers, React pre-saves before Node queues)
        Body: { results, message, total, user_id, status="pending" }
        → Deducts credit, saves Campaign with status=pending, returns campaign_id
+       → The Node server (not Django) sends the admin WhatsApp alert and
+         schedules the 25-35 min auto-complete callback — see send-bulk in
+         server.js. Django's only job here is the credit/record bookkeeping.
 
     3. QUEUE COMPLETION (Node worker calls back when done)
        Body: { results, message, total, user_id, campaign_id, status="completed" }
@@ -492,11 +506,11 @@ def send_whatsapp(request):
 
         # Tally (pending campaigns have 0/0/0 — results not processed yet)
         if status == "pending":
-         sent =0
-         failed = 0
-         nonwa = 0
-         print(
-        f"""
+            sent = 0
+            failed = 0
+            nonwa = 0
+            print(
+                f"""
 🚀 NEW CAMPAIGN
 
 👤 User: {user.username}
@@ -504,10 +518,9 @@ def send_whatsapp(request):
 ⏳ Status: PENDING
 💳 Credits Left: {user.credit}
 """
-    )
+            )
         else:
             sent, failed, nonwa = _tally(clean)
-
 
         campaign = Campaign.objects.create(
             user    = user,

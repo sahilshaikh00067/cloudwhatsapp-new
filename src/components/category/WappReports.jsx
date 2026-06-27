@@ -110,7 +110,6 @@ const StatusBadge = memo(({ status }) =>
 );
 
 const ExpandedRow = memo(({ entry }) => {
-  console.log("ENTRY MEDIA:", entry.media);
   if (entry.status === "pending") {
     return (
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
