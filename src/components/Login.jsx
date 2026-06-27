@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 // ─────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────
-const API_URL  = "https://whatsappsms-olho.onrender.com/api/login/";
+const API_URL  = "https://api.cloudwhatsapp.in/api/login/";
 const TIMEOUT  = 10_000;
 
 // ─────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { FaComments } from "react-icons/fa";
 // CONSTANTS
 // ─────────────────────────────────────────────
 const API_NODE   = "https://wa.cloudwhatsapp.in";
-const API_DJANGO = "https://whatsappsms-olho.onrender.com";
+const API_DJANGO = "https://api.cloudwhatsapp.in";
 const QUEUE_THRESHOLD = 20; // 🔥 numbers above this go to "pending" queue
 
 // ─────────────────────────────────────────────
