@@ -30,8 +30,10 @@ ALLOWED_HOSTS = [
     "www.api.cloudwhatsapp.in",
     "127.0.0.1",
     "localhost",
+    "cloudwhatsapp.in",
+    "www.cloudwhatsapp.in",
+    "206.81.10.143",
 ]
-
 # Application definition
 
 INSTALLED_APPS = [
