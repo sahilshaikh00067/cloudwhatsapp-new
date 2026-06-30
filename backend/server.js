@@ -883,6 +883,11 @@ app.post("/send-bulk", upload.any(), async (req, res) => {
   const username = req.body.username || req.body.userName || userId || "User";
   const files = req.files || [];
   const campaignId = req.body.campaignId || null;
+  console.log("=================================");
+  console.log("BODY:", req.body);
+  console.log("campaignId:", req.body.campaignId);
+  console.log("userId:", req.body.userId);
+  console.log("=================================");
 
   if (!Array.isArray(numbers)) numbers = [numbers];
   numbers = [...new Set(numbers.map((n) => n.trim()).filter(Boolean))];
@@ -949,18 +954,36 @@ app.post("/send-bulk", upload.any(), async (req, res) => {
   }
 
   // ── Small batch (<= QUEUE_THRESHOLD) — direct sequential send ──
+  // 🔥 Paced sequential send: small jitter gap between every number so
+  // WhatsApp doesn't flag rapid-fire sends as spam (which was silently
+  // causing some numbers in a ≤20 batch to fail/skip, breaking the report).
   await prewarm(files);
   const finalResults = [];
+  const SMALL_BATCH_GAP_MS = 1200; // gap between consecutive numbers
 
   for (let idx = 0; idx < numbers.length; idx++) {
     const number = numbers[idx];
-    const deviceId = active[idx % active.length];
+
+    // Re-check live devices each iteration — if a device dies mid-run,
+    // fall back to whatever is still alive instead of hammering a dead one.
+    const liveNow = readyDevices();
+    if (!liveNow.length) {
+      finalResults.push({ number, deviceId: null, status: "failed", reason: "device_offline" });
+      continue;
+    }
+    const deviceId = liveNow[idx % liveNow.length];
+
     const r = await sendToNumber(deviceId, number, message, files)
       .catch(() => ({ number, deviceId, status: "failed", reason: "exception" }));
     finalResults.push({ ...r, deviceId });
+
+    if (idx < numbers.length - 1) {
+      await sleep(jitter(SMALL_BATCH_GAP_MS, 400));
+    }
   }
 
   const s = tally(finalResults);
+  log(`📊 Small-batch done: ${numbers.length} total ✅${s.sent} 🚫${s.nonwa} ❌${s.failed}`);
   res.json({ status: "done", total: numbers.length, ...s, results: finalResults });
 });
 

@@ -176,6 +176,107 @@ function parseAndValidateNumbers(raw) {
 }
 
 // ─────────────────────────────────────────────
+// BACKGROUND SENDER
+// Runs AFTER the UI has already reset + shown the "message will be
+// sent" popup. Takes a frozen snapshot of everything it needs so it
+// doesn't care that form state has already been cleared. Talks to
+// the report screen purely via window events — never touches modal/
+// form state directly (component may have moved on to a new draft).
+// ─────────────────────────────────────────────
+async function runCampaignInBackground({ numberList, dp, images, video, pdf, message, user, isLarge }) {
+  try {
+    const filesData = buildFilesData(dp, images, video, pdf);
+    let campaignId = null;
+
+    // ── Pre-save pending ──
+    if (isLarge) {
+      const pendingData = await safeFetch(`${API_DJANGO}/api/send-whatsapp/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          results: numberList.map((n) => ({ number: n, status: "pending", files: filesData })),
+          message, total: numberList.length, user_id: user.id, status: "pending",
+        }),
+      });
+
+      if (pendingData.status === "failed") {
+        console.error("Campaign pre-save failed:", pendingData.message);
+        return;
+      }
+
+      campaignId = pendingData.campaign_id || null;
+
+      if (pendingData.remaining_credit !== undefined) {
+        sessionStorage.setItem("user", JSON.stringify({ ...user, credit: pendingData.remaining_credit }));
+        window.dispatchEvent(new Event("creditUpdated"));
+      }
+
+      // Pending row now exists — let the Report tab pick it up immediately.
+      window.dispatchEvent(new Event("campaignUpdated"));
+
+      // Node server sends the admin WhatsApp alert + 25-35 min auto-complete.
+      // Nothing more to do here for large batches.
+      return;
+    }
+
+    // ── Send to Node ──
+    const formData = new FormData();
+    numberList.forEach((n) => formData.append("numbers", n));
+    formData.append("message",  message || "");
+    formData.append("mode",     "dp");
+    formData.append("userRole", user?.role || "user");
+    if (user?.id)    formData.append("userId",     user.id);
+    if (campaignId)  formData.append("campaignId", campaignId);
+    if (dp)          formData.append("dp",         dp);
+    images.forEach((img) => formData.append("files", img));
+    if (video) formData.append("files", video);
+    if (pdf)   formData.append("files", pdf);
+
+    const data = await safeFetch(`${API_NODE}/send-bulk`, { method: "POST", body: formData });
+
+    if (data.status === "blocked" || data.status === "no_device") {
+      console.error("Campaign failed:", data.status, data.message);
+      return;
+    }
+    if (data.status === "Pending" || data.status === "approval_pending") {
+      window.dispatchEvent(new Event("campaignUpdated"));
+      return;
+    }
+    if (!user?.id) {
+      console.error("Session missing — could not save completed campaign.");
+      return;
+    }
+
+    // ── Save completed to Django ──
+    const updatedResults = (data.results || []).map((r) => ({ ...r, files: filesData }));
+
+    const saveData = await safeFetch(`${API_DJANGO}/api/send-whatsapp/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        results: updatedResults, message,
+        total: data.total || numberList.length, user_id: user.id, status: "completed",
+      }),
+    });
+
+    if (saveData.status === "failed") {
+      console.error("Campaign save failed:", saveData.message);
+      return;
+    }
+
+    if (saveData.remaining_credit !== undefined) {
+      sessionStorage.setItem("user", JSON.stringify({ ...user, credit: saveData.remaining_credit }));
+    }
+
+    window.dispatchEvent(new Event("campaignUpdated"));
+    window.dispatchEvent(new Event("creditUpdated"));
+
+  } catch (err) {
+    console.error("BACKGROUND SEND ERROR:", err);
+  }
+}
+
+// ─────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────
 export default function WappDpCampaign() {
@@ -188,7 +289,6 @@ export default function WappDpCampaign() {
   const [numbers,      setNumbers]      = useState("");
   const [message,      setMessage]      = useState("");
   const [showConfirm,  setShowConfirm]  = useState(false);
-  const [loading,      setLoading]      = useState(false);
   const [modal,        setModal]        = useState(null);
 
   const showModal = useCallback((type, title, body = "") => setModal({ type, title, body }), []);
@@ -205,130 +305,44 @@ export default function WappDpCampaign() {
     if (dpRef.current) dpRef.current.value = "";
   }, []);
 
-  // ── SEND ──
-  const sendCampaign = useCallback(async () => {
-    if (loading) return;
-    setLoading(true);
-    setShowConfirm(false);
-
+  // ── CONFIRM → "Yes, Send" ──
+  // Fires instantly: shows the "message will be sent" popup, clears the
+  // form right away, then kicks off the real send in the background.
+  // Report tab updates itself via the campaignUpdated/creditUpdated events.
+  const confirmSend = useCallback(() => {
     if (!numberList.length) {
+      setShowConfirm(false);
       showModal("error", "No Numbers!", "Please enter at least one number.");
-      setLoading(false);
       return;
     }
 
-    try {
-      const filesData  = buildFilesData(dp, images, video, pdf);
-      let   campaignId = null;
+    // Freeze everything the background sender needs BEFORE we reset the form.
+    const snapshot = {
+      numberList,
+      dp,
+      images,
+      video,
+      pdf,
+      message,
+      user,
+      isLarge,
+    };
 
-      // ── Pre-save pending ──
-      if (isLarge) {
-        const pendingData = await safeFetch(`${API_DJANGO}/api/send-whatsapp/`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify({
-            results:  numberList.map((n) => ({ number: n, status: "pending", files: filesData })),
-            message, total: numberList.length, user_id: user.id, status: "pending",
-          }),
-        });
+    setShowConfirm(false);
 
-        if (pendingData.status === "failed") {
-          showModal("error", "Insufficient Balance ❌", pendingData.message || "Not enough credits.");
-          setLoading(false);
-          return;
-        }
+    showModal(
+      "info",
+      "Message Will Be Sent 🚀",
+      isLarge
+        ? `Total Numbers: ${numberList.length}\n\nCampaign queued — status "PENDING".\nCheck the Report tab for live updates.`
+        : `Total Numbers: ${numberList.length}\n\nYour Campaign Will Be Send.\nCheck the Report .`
+    );
 
-        campaignId = pendingData.campaign_id || null;
-        if (pendingData.remaining_credit !== undefined) {
-          sessionStorage.setItem("user", JSON.stringify({ ...user, credit: pendingData.remaining_credit }));
-        }
+    resetForm();
 
-        // Django has saved the campaign as "pending" and deducted credit.
-        // The Node server (called below) will send the admin WhatsApp
-        // alert and schedule the 25-35 min auto-complete callback.
-      }
-
-      // ── Send to Node ──
-      const formData = new FormData();
-      numberList.forEach((n) => formData.append("numbers", n));
-      formData.append("message",  message || "");
-      formData.append("mode",     "dp");
-      formData.append("userRole", user?.role || "user");
-      if (user?.id)    formData.append("userId",     user.id);
-      if (campaignId)  formData.append("campaignId", campaignId);
-      if (dp)          formData.append("dp",         dp);
-      images.forEach((img) => formData.append("files", img));
-      if (video) formData.append("files", video);
-      if (pdf)   formData.append("files", pdf);
-
-      const data = await safeFetch(`${API_NODE}/send-bulk`, { method: "POST", body: formData });
-
-      if (data.status === "blocked") {
-        showModal("warning", "Campaign Blocked ⛔", "Campaigns allowed only between\n9:00 AM – 6:00 PM.\n\nPlease try again tomorrow.");
-        setLoading(false);
-        return;
-      }
-      if (data.status === "no_device") {
-        showModal("error", "No Device Connected ❌", "No WhatsApp device connected.\nPlease connect and try again.");
-        setLoading(false);
-        return;
-      }
-      if (
-   data.status === "Pending" ||
-   data.status === "approval_pending"
-){
-        showModal("info", "Campaign ⏳",
-          `Total Numbers: ${data.total}\n\nStatus "PENDING"`
-        );
-        resetForm();
-        setLoading(false);
-        return;
-      }
-
-      if (!user?.id) {
-        showModal("error", "Session Missing ❌", "User session not found. Please login again.");
-        setLoading(false);
-        return;
-      }
-
-      // ── Save completed to Django ──
-      const updatedResults = (data.results || []).map((r) => ({ ...r, files: filesData }));
-
-      const saveData = await safeFetch(`${API_DJANGO}/api/send-whatsapp/`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          results: updatedResults, message,
-          total: data.total || numberList.length, user_id: user.id, status: "completed",
-        }),
-      });
-
-      if (saveData.status === "failed") {
-        showModal("error", "Insufficient Balance ❌", saveData.message || "Not enough credits.");
-        setLoading(false);
-        return;
-      }
-
-      if (saveData.remaining_credit !== undefined) {
-        sessionStorage.setItem("user", JSON.stringify({ ...user, credit: saveData.remaining_credit }));
-      }
-
-      const t = tallyResults(data.results);
-      showModal("success", "Sent Successfully 🚀",
-        `Total:   ${data.total}\nSent:    ${t.sent}\nFailed:  ${t.failed}\nNon-WA: ${t.nonwa}`
-      );
-
-      resetForm();
-      window.dispatchEvent(new Event("campaignUpdated"));
-      window.dispatchEvent(new Event("creditUpdated"));
-
-    } catch (err) {
-      console.error("SEND ERROR:", err);
-      showModal("error", "Unexpected Error ❌", "Something went wrong. Please try again.");
-    }
-
-    setLoading(false);
-  }, [loading, numberList, dp, images, video, pdf, message, user, isLarge, showModal, resetForm]);
+    // Fire and forget — does not block the UI.
+    runCampaignInBackground(snapshot);
+  }, [numberList, dp, images, video, pdf, message, user, isLarge, showModal, resetForm]);
 
   const handleSendClick = useCallback(() => {
     if (!campaignName.trim() || !numbers.trim() || !message.trim()) {
@@ -460,15 +474,9 @@ export default function WappDpCampaign() {
             <button
               type="button"
               onClick={handleSendClick}
-              disabled={loading}
-              className="mt-4 bg-[#20A8D8] hover:bg-[#1b8db8] text-white px-7 py-3 disabled:opacity-50 rounded-b-md transition-colors"
+              className="mt-4 bg-[#20A8D8] hover:bg-[#1b8db8] text-white px-7 py-3 rounded-b-md transition-colors"
             >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Sending...
-                </span>
-              ) : "Send Now"}
+              Send Now
             </button>
 
           </div>
@@ -500,7 +508,7 @@ export default function WappDpCampaign() {
             )}
 
             <div className="flex gap-3 justify-center">
-              <button onClick={sendCampaign}
+              <button onClick={confirmSend}
                 className="px-5 py-2 rounded-lg bg-gradient-to-r from-green-500 to-emerald-600 text-white font-medium shadow hover:scale-105 transition">
                 Yes, Send
               </button>

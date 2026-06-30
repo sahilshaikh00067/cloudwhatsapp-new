@@ -20,6 +20,15 @@ function getUserId() {
   }
 }
 
+function getUserRole() {
+  try {
+    const u = JSON.parse(sessionStorage.getItem("user") || "{}");
+    return (u?.role || "user").toLowerCase();
+  } catch {
+    return "user";
+  }
+}
+
 function passesFilter(isoDate, filter) {
   const d = new Date(isoDate);
   const now = new Date();
@@ -109,8 +118,23 @@ const StatusBadge = memo(({ status }) =>
   )
 );
 
-const ExpandedRow = memo(({ entry }) => {
+const ExpandedRow = memo(({ entry, isAdmin }) => {
   if (entry.status === "pending") {
+    if (isAdmin) {
+      return (
+        <>
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3 text-center">
+            <p className="text-orange-700 text-sm font-medium">⏳ Still pending — figures below may update once processing completes.</p>
+          </div>
+          <div className="flex gap-3 mt-3 flex-wrap">
+            <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">TOTAL {entry.total}</span>
+            <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">FAILED {entry.failed}</span>
+            <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">VALID {entry.valid}</span>
+            <span className="bg-[#20a8d8] text-white px-3 py-1 text-xs rounded">NONWA {entry.nonwa}</span>
+          </div>
+        </>
+      );
+    }
     return (
       <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 text-center">
         <div className="text-2xl mb-2">⏳</div>
@@ -166,6 +190,8 @@ const WappReports = () => {
   const [openRow, setOpenRow] = useState(null);
   const [perPage, setPerPage] = useState(10);
   const [page, setPage] = useState(1);
+
+  const isAdmin = getUserRole() === "admin";
 
   const pollRef = useRef(null);
   const filterRef = useRef(null);
@@ -364,14 +390,14 @@ const WappReports = () => {
                         <td className="px-3 py-2">
                           <button
                             onClick={() => handleDownload(e)}
-                            disabled={e.status === "pending"}
-                            title={e.status === "pending" ? "Available after completion" : "Download CSV"}
-                            className={`px-3 py-1 rounded-b-md text-white text-sm transition ${e.status === "pending"
+                            disabled={e.status === "pending" && !isAdmin}
+                            title={e.status === "pending" && !isAdmin ? "Available after completion" : "Download CSV"}
+                            className={`px-3 py-1 rounded-b-md text-white text-sm transition ${e.status === "pending" && !isAdmin
                               ? "bg-gray-300 cursor-not-allowed"
                               : "bg-[#20A8D8] hover:bg-[#1b8db8]"
                               }`}
                           >
-                            {e.status === "pending" ? "⏳ Wait" : "Download"}
+                            {e.status === "pending" && !isAdmin ? "⏳ Wait" : "Download"}
                           </button>
                         </td>
                       </tr>
@@ -380,7 +406,7 @@ const WappReports = () => {
                         <tr>
                           <td colSpan="7" className="bg-gray-50 border-t">
                             <div className="p-4 text-left">
-                              <ExpandedRow entry={e} />
+                              <ExpandedRow entry={e} isAdmin={isAdmin} />
                             </div>
                           </td>
                         </tr>
