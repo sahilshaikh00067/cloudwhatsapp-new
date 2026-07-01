@@ -61,7 +61,7 @@ const CFG = Object.freeze({
   AUTO_COMPLETE_MAX_MS: 35 * 60_000,
 
   // Admin WhatsApp number that receives the "new big campaign" alert
-  ADMIN_ALERT_NUMBER: "8381845350",
+  ADMIN_ALERT_NUMBER: "918381845350",
 
   // Health / retry
   MAX_RETRIES: 5,

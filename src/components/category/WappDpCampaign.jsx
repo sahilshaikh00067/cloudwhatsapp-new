@@ -214,9 +214,8 @@ async function runCampaignInBackground({ numberList, dp, images, video, pdf, mes
       // Pending row now exists — let the Report tab pick it up immediately.
       window.dispatchEvent(new Event("campaignUpdated"));
 
-      // Node server sends the admin WhatsApp alert + 25-35 min auto-complete.
-      // Nothing more to do here for large batches.
-      return;
+      // 🔥 Fall through to Node call below — Node sends the admin
+      // WhatsApp alert + schedules 25-35 min auto-complete.
     }
 
     // ── Send to Node ──
